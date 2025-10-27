@@ -3,7 +3,6 @@ import { FBXLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/
 import { PointerLockControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
 import { SimplexNoise } from 'https://unpkg.com/three@0.160.0/examples/jsm/math/SimplexNoise.js';
 import { unzipSync } from './vendor/fflate.module.js';
-import { unzipSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/index.js';
 
 const MONSTER_ARCHIVE_URL = './assets/Archive.zip';
 

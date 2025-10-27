@@ -1,10 +1,4 @@
 node_modules/
 .DS_Store
-assets/*.glb
-assets/*.bin
-assets/*.fbx
-assets/*.c4d
-assets/*.mp3
-assets/*.wav
 .vscode/
 dist/
