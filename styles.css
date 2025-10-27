@@ -64,6 +64,40 @@ h1 {
   color: #f0f0f0;
 }
 
+.actions {
+  pointer-events: auto;
+}
+
+#restart-button {
+  margin-top: 0.5rem;
+  padding: 0.6rem 1.6rem;
+  border: 2px solid #ff3b3b;
+  background: rgba(10, 0, 0, 0.7);
+  color: #ffdddd;
+  font-size: 0.95rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+  display: none;
+}
+
+#restart-button.visible {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#restart-button:hover {
+  background: rgba(60, 0, 0, 0.85);
+  color: #ffffff;
+  transform: translateY(-2px);
+}
+
+#restart-button:active {
+  transform: translateY(0);
+}
+
 @media (max-width: 600px) {
   #overlay {
     padding: 1rem;

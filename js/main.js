@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
-import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
 import { unzipSync } from './vendor/fflate.module.js';
 
 const MONSTER_ARCHIVE_URL = './assets/Archive.zip';
@@ -12,6 +11,7 @@ const DESIRED_MONSTER_HEIGHT = 2.8;
 
 const canvas = document.getElementById('scene');
 const interactionText = document.getElementById('interaction');
+const restartButton = document.getElementById('restart-button');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -21,8 +21,8 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x010101);
-scene.fog = new THREE.FogExp2(0x040404, 0.08);
+scene.background = new THREE.Color(0x080202);
+scene.fog = new THREE.FogExp2(0x120202, 0.06);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 400);
 
@@ -59,8 +59,6 @@ const monsterState = {
   mixer: null,
   actions: {},
   currentAction: null,
-  patrolPoints: [],
-  targetIndex: 0,
   mode: 'dormant',
 };
 
@@ -69,22 +67,28 @@ const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
 const previousPlayerPosition = new THREE.Vector3();
 const monsterDirection = new THREE.Vector3();
+const forwardVector = new THREE.Vector3();
+const tempVector = new THREE.Vector3();
 let sprintTimer = 0;
-let ritualsCompleted = 0;
+
+const gameState = {
+  phase: 'approach',
+  triggered: false,
+  ambushTimer: 0,
+  movementLocked: false,
+  ended: false,
+};
 
 const playerCollider = new THREE.Sphere(new THREE.Vector3(), 1.2);
 
 const environment = createEnvironment();
-monsterState.patrolPoints = environment.monsterPatrolPoints;
 controls.getObject().position.set(environment.playerStart.x, 1.7, environment.playerStart.z);
 playerCollider.center.copy(controls.getObject().position);
 
 laughterSource.position.copy(environment.monsterSpawn.clone().add(monsterAudioOffset));
 
 createLighting(environment.lightAnchors);
-const updateMist = createMistParticles(environment.bounds);
-const interactables = createInteractables(environment.altarSpots);
-const chaseThreshold = Math.max(1, Math.min(interactables.length, 2));
+const updateMist = null;
 
 loadMonsterFromArchive()
   .then(({ object, mixer, actions }) => {
@@ -93,14 +97,16 @@ loadMonsterFromArchive()
     monsterState.actions = actions;
     mixers.push(mixer);
 
+    object.visible = false;
     object.position.copy(environment.monsterSpawn);
     object.position.y = 0;
     scene.add(object);
 
     playMonsterAction('idle', 0.1);
-    setMonsterMode('patrol');
+    setMonsterMode('dormant');
 
-    interactionText.textContent = 'Stay quiet. Footsteps echo somewhere ahead...';
+    interactionText.textContent = 'Walk forward. Something hums beyond the bend...';
+    interactionText.classList.add('active');
   })
   .catch((error) => {
     console.error('Failed to load monster', error);
@@ -110,13 +116,14 @@ loadMonsterFromArchive()
 const clock = new THREE.Clock();
 let flickerTimer = 0;
 
-document.addEventListener('click', () => controls.lock());
+document.addEventListener('click', () => {
+  if (!gameState.ended) {
+    controls.lock();
+  }
+});
 
 document.addEventListener('keydown', (event) => {
   keyStates[event.code] = true;
-  if (event.code === 'Space' && controls.isLocked) {
-    attemptInteraction(chaseThreshold);
-  }
 });
 
 document.addEventListener('keyup', (event) => {
@@ -124,11 +131,24 @@ document.addEventListener('keyup', (event) => {
 });
 
 controls.addEventListener('lock', () => {
-  interactionText.textContent = 'The maze exhales as you step inside...';
+  if (gameState.ended) return;
+  interactionText.textContent =
+    gameState.phase === 'approach'
+      ? 'Step forward. The hallway forces you ahead.'
+      : 'Keep moving. The monster is right behind you!';
+  interactionText.classList.add('active');
 });
 
 controls.addEventListener('unlock', () => {
-  interactionText.textContent = 'Click to re-enter the labyrinth.';
+  if (gameState.ended) {
+    interactionText.textContent = 'Click Restart to try again.';
+  } else {
+    interactionText.textContent = 'Click to re-enter the hallway.';
+  }
+});
+
+restartButton.addEventListener('click', () => {
+  window.location.reload();
 });
 
 window.addEventListener('resize', () => {
@@ -142,6 +162,7 @@ function animate() {
 
   const delta = Math.min(clock.getDelta(), 0.05);
   updatePlayer(delta);
+  updateAmbush(delta);
   updateMonster(delta);
   updateFlicker(delta);
 
@@ -156,11 +177,33 @@ function animate() {
 animate();
 
 function updatePlayer(delta) {
-  if (!controls.isLocked) return;
+  const playerObject = controls.getObject();
+  const position = playerObject.position;
 
-  previousPlayerPosition.copy(controls.getObject().position);
+  if (!controls.isLocked) {
+    playerCollider.center.copy(position);
+    return;
+  }
 
-  const speed = keyStates['ShiftLeft'] || keyStates['ShiftRight'] ? 22 : 10.5;
+  if (gameState.ended) {
+    velocity.x = 0;
+    velocity.z = 0;
+    playerCollider.center.copy(position);
+    return;
+  }
+
+  previousPlayerPosition.copy(position);
+
+  if (gameState.movementLocked) {
+    velocity.x = 0;
+    velocity.z = 0;
+    playerCollider.center.copy(position);
+    checkChaseTrigger();
+    checkWinCondition();
+    return;
+  }
+
+  const speed = keyStates['ShiftLeft'] || keyStates['ShiftRight'] ? 12.5 : 7.5;
   if (keyStates['ShiftLeft'] || keyStates['ShiftRight']) {
     sprintTimer = Math.min(sprintTimer + delta * 0.7, 1);
   } else {
@@ -180,14 +223,13 @@ function updatePlayer(delta) {
     direction.normalize();
   }
 
-  const currentSpeed = speed + sprintTimer * 12;
+  const currentSpeed = speed + sprintTimer * 8;
   if (direction.z !== 0) velocity.z -= direction.z * currentSpeed * delta;
   if (direction.x !== 0) velocity.x -= direction.x * currentSpeed * delta;
 
   controls.moveRight(-velocity.x * delta);
   controls.moveForward(-velocity.z * delta);
 
-  const position = controls.getObject().position;
   if (isColliding(position)) {
     position.copy(previousPlayerPosition);
     velocity.set(0, velocity.y, 0);
@@ -195,7 +237,8 @@ function updatePlayer(delta) {
 
   position.y = THREE.MathUtils.clamp(position.y, 1.6, 1.82);
   playerCollider.center.copy(position);
-  checkInteractions();
+  checkChaseTrigger();
+  checkWinCondition();
 }
 
 function isColliding(position) {
@@ -218,30 +261,32 @@ function updateFlicker(delta) {
 }
 
 function createLighting(anchors) {
-  const ambient = new THREE.AmbientLight(0x110507, 0.55);
+  const ambient = new THREE.AmbientLight(0x1a0808, 0.64);
   scene.add(ambient);
 
-  anchors.forEach((anchor) => {
-    const light = new THREE.SpotLight(0xff2b2b, 1.7, 22, Math.PI / 5, 0.6, 1.15);
+  anchors.forEach((anchor, index) => {
+    if (index % 2 !== 0) {
+      return;
+    }
+
+    const light = new THREE.PointLight(0xff3a20, 1.4, 24, 2.2);
     light.position.set(anchor.x, anchor.y, anchor.z);
-    light.target.position.set(anchor.x, 0, anchor.z);
     light.castShadow = true;
-    light.shadow.mapSize.set(1024, 1024);
-    light.shadow.bias = -0.0004;
+    light.shadow.mapSize.set(512, 512);
+    light.shadow.bias = -0.0006;
     light.userData.type = 'flicker';
     scene.add(light);
-    scene.add(light.target);
 
     const fixture = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.28, 0.6, 12),
+      new THREE.CylinderGeometry(0.18, 0.3, 0.5, 12),
       new THREE.MeshStandardMaterial({
-        color: 0x240505,
-        emissive: new THREE.Color(0x360000),
-        emissiveIntensity: 0.6,
-        roughness: 0.45,
+        color: 0x2a0606,
+        emissive: new THREE.Color(0x4c0000),
+        emissiveIntensity: 0.55,
+        roughness: 0.38,
       }),
     );
-    fixture.position.set(anchor.x, anchor.y - 0.4, anchor.z);
+    fixture.position.set(anchor.x, anchor.y - 0.28, anchor.z);
     fixture.rotation.x = Math.PI / 2;
     scene.add(fixture);
   });
@@ -249,44 +294,50 @@ function createLighting(anchors) {
 
 function createEnvironment() {
   const mazeLayout = [
-    '############',
-    '#S..+..#..M#',
-    '##.#.#.##.##',
-    '#.+..#.+..##',
-    '#.####.##.##',
-    '#.....+...##',
-    '############',
+    '#############',
+    '###....#..C##',
+    '###.##.#.####',
+    '###.#......##',
+    '###.#..#.#.##',
+    '###.#....#.##',
+    '###...####.##',
+    '######.T...##',
+    '######.######',
+    '######.######',
+    '######.######',
+    '######S######',
+    '#############',
   ];
 
-  const cellSize = 7;
-  const wallHeight = 5;
+  const cellSize = 6;
+  const wallHeight = 4.4;
   const cols = mazeLayout[0].length;
   const rows = mazeLayout.length;
   const originX = -((cols - 1) * cellSize) / 2;
   const originZ = -((rows - 1) * cellSize) / 2;
 
   const floorMaterial = new THREE.MeshStandardMaterial({
-    color: 0x190a0a,
-    roughness: 0.96,
-    metalness: 0.04,
+    color: 0x3a1515,
+    roughness: 0.92,
+    metalness: 0.08,
   });
   const ceilingMaterial = new THREE.MeshStandardMaterial({
-    color: 0x050404,
-    roughness: 0.82,
-    metalness: 0.08,
+    color: 0x080404,
+    roughness: 0.78,
+    metalness: 0.12,
     side: THREE.BackSide,
   });
   const trimMaterial = new THREE.MeshStandardMaterial({
-    color: 0x250505,
-    roughness: 0.45,
-    metalness: 0.22,
-    emissive: new THREE.Color(0x250000),
-    emissiveIntensity: 0.28,
+    color: 0x4a1616,
+    roughness: 0.5,
+    metalness: 0.18,
+    emissive: new THREE.Color(0x1a0000),
+    emissiveIntensity: 0.2,
   });
   const wallMaterial = new THREE.MeshStandardMaterial({
-    color: 0x050101,
-    roughness: 0.84,
-    metalness: 0.12,
+    color: 0x1a0404,
+    roughness: 0.88,
+    metalness: 0.1,
   });
 
   const floorGeometry = new THREE.PlaneGeometry(cellSize, cellSize);
@@ -296,14 +347,13 @@ function createEnvironment() {
   ceilingGeometry.rotateX(Math.PI / 2);
 
   const wallGeometry = new THREE.BoxGeometry(cellSize, wallHeight, cellSize);
-  const trimGeometry = new THREE.BoxGeometry(cellSize, 0.18, cellSize);
+  const trimGeometry = new THREE.BoxGeometry(cellSize, 0.12, cellSize);
 
-  const noise = new SimplexNoise();
   const lightAnchors = [];
-  const altarCandidates = [];
-  const monsterPatrolPoints = [];
   let playerStart = new THREE.Vector3(0, 0, 0);
   let monsterSpawn = new THREE.Vector3(0, 0, 0);
+  let chaseTrigger = null;
+  let goalPosition = null;
 
   for (let row = 0; row < rows; row += 1) {
     const line = mazeLayout[row];
@@ -327,46 +377,41 @@ function createEnvironment() {
         continue;
       }
 
-      const heightJitter = noise.noise(worldX * 0.12, worldZ * 0.12) * 0.22;
       const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-      floor.position.set(worldX, heightJitter - 0.04, worldZ);
+      floor.position.set(worldX, -0.06, worldZ);
       floor.receiveShadow = true;
       scene.add(floor);
 
       const trim = new THREE.Mesh(trimGeometry, trimMaterial);
-      trim.position.set(worldX, heightJitter + 0.01, worldZ);
+      trim.position.set(worldX, 0.02, worldZ);
       trim.receiveShadow = true;
       scene.add(trim);
 
       const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
-      ceiling.position.set(worldX, wallHeight - 0.1, worldZ);
+      ceiling.position.set(worldX, wallHeight - 0.18, worldZ);
       scene.add(ceiling);
+
+      const anchor = new THREE.Vector3(worldX, wallHeight - 0.6, worldZ);
+      lightAnchors.push(anchor);
 
       if (cell === 'S') {
         playerStart = new THREE.Vector3(worldX, 0, worldZ);
       }
-      if (cell === 'M') {
-        monsterSpawn = new THREE.Vector3(worldX, 0, worldZ);
-        lightAnchors.push(new THREE.Vector3(worldX, wallHeight - 0.4, worldZ));
+      if (cell === 'T') {
+        chaseTrigger = new THREE.Vector3(worldX, 0, worldZ);
+        monsterSpawn = chaseTrigger.clone();
       }
-
-      if (cell === '+' || cell === 'M') {
-        monsterPatrolPoints.push(new THREE.Vector3(worldX, 0, worldZ));
-        lightAnchors.push(new THREE.Vector3(worldX, wallHeight - 0.4, worldZ));
-      } else if (cell === '.' && (row + col) % 3 === 0) {
-        altarCandidates.push(new THREE.Vector3(worldX, 0, worldZ));
-      }
-
-      if ((row + col) % 4 === 0) {
-        const column = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.22, 0.35, wallHeight, 6),
-          trimMaterial,
-        );
-        column.position.set(worldX - cellSize / 2 + 0.4, wallHeight / 2, worldZ + cellSize / 2 - 0.4);
-        column.castShadow = true;
-        scene.add(column);
+      if (cell === 'C') {
+        goalPosition = new THREE.Vector3(worldX, 0, worldZ);
       }
     }
+  }
+
+  if (!monsterSpawn) {
+    monsterSpawn = playerStart.clone();
+  }
+  if (!chaseTrigger) {
+    chaseTrigger = monsterSpawn.clone();
   }
 
   const anchorKeys = new Set();
@@ -379,77 +424,17 @@ function createEnvironment() {
     }
   });
 
-  const altarSpots = altarCandidates.slice(0, 4);
-
   return {
     playerStart,
     monsterSpawn,
-    monsterPatrolPoints,
-    altarSpots,
+    chaseTrigger,
+    goalPosition,
     lightAnchors: uniqueAnchors,
     bounds: {
       width: cols * cellSize,
       depth: rows * cellSize,
     },
-  };
-}
-
-function createMistParticles(bounds) {
-  const particleGeometry = new THREE.BufferGeometry();
-  const particleCount = 1100;
-  const positions = new Float32Array(particleCount * 3);
-  const speeds = new Float32Array(particleCount);
-
-  for (let i = 0; i < particleCount; i += 1) {
-    positions[i * 3] = (Math.random() - 0.5) * bounds.width * 0.9;
-    positions[i * 3 + 1] = 0.4 + Math.random() * 3.5;
-    positions[i * 3 + 2] = (Math.random() - 0.5) * bounds.depth * 0.9;
-    speeds[i] = 0.3 + Math.random() * 0.7;
-  }
-
-  particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  particleGeometry.setAttribute('speed', new THREE.BufferAttribute(speeds, 1));
-
-  const particleMaterial = new THREE.PointsMaterial({
-    color: 0xaa2020,
-    size: 0.7,
-    transparent: true,
-    opacity: 0.22,
-    depthWrite: false,
-  });
-
-  const mist = new THREE.Points(particleGeometry, particleMaterial);
-  mist.name = 'mist';
-  scene.add(mist);
-
-  return (delta) => {
-    const posAttr = mist.geometry.getAttribute('position');
-    const speedAttr = mist.geometry.getAttribute('speed');
-    const time = performance.now() * 0.001;
-
-    for (let i = 0; i < posAttr.count; i += 1) {
-      const speed = speedAttr.getX(i);
-      let x = posAttr.getX(i);
-      let y = posAttr.getY(i);
-      let z = posAttr.getZ(i);
-
-      x += Math.sin(time * 0.4 + z * 0.08) * delta * 0.9;
-      y += Math.cos(time + x * 0.25) * delta * 0.5;
-      z += speed * delta * 1.5;
-
-      if (z > bounds.depth / 2) {
-        z = -bounds.depth / 2;
-      }
-      if (x > bounds.width / 2) {
-        x = -bounds.width / 2;
-      } else if (x < -bounds.width / 2) {
-        x = bounds.width / 2;
-      }
-
-      posAttr.setXYZ(i, x, THREE.MathUtils.clamp(y, 0.4, 4.6), z);
-    }
-
-    posAttr.needsUpdate = true;
+    cellSize,
   };
 }
 
@@ -619,150 +604,169 @@ function setMonsterMode(mode) {
   if (monsterState.mode === mode) return;
   monsterState.mode = mode;
 
-  if (mode === 'patrol') {
-    playMonsterAction('walk', 0.6);
+  if (mode === 'ambush') {
+    playMonsterAction('attack', 0.3);
   } else if (mode === 'chase') {
-    playMonsterAction('attack', 0.2);
+    playMonsterAction('walk', 0.25);
   } else {
-    playMonsterAction('idle', 0.6);
+    playMonsterAction('idle', 0.5);
   }
 }
 
 function updateMonster(delta) {
-  if (!monsterState.object) return;
-
-  let targetPosition = null;
-  if (monsterState.mode === 'chase') {
-    targetPosition = controls.getObject().position;
-  } else if (monsterState.patrolPoints.length > 0) {
-    targetPosition = monsterState.patrolPoints[monsterState.targetIndex];
-  }
+  if (!monsterState.object || !monsterState.object.visible) return;
 
   const monsterPosition = monsterState.object.position;
-  if (targetPosition) {
-    monsterDirection.copy(targetPosition).sub(monsterPosition);
+  const playerPosition = controls.getObject().position;
+
+  if (monsterState.mode === 'ambush') {
+    monsterState.object.lookAt(playerPosition.x, 1.6, playerPosition.z);
+    laughterSource.position.copy(monsterPosition).add(monsterAudioOffset);
+    return;
+  }
+
+  if (monsterState.mode === 'chase') {
+    monsterDirection.copy(playerPosition).sub(monsterPosition);
     const distance = monsterDirection.length();
 
     if (distance > 0.05) {
       monsterDirection.normalize();
-      const speed = monsterState.mode === 'chase' ? 3.6 : 1.6;
+      const baseSpeed = 4.2;
+      const speed = baseSpeed + Math.min(1.8, sprintTimer * 1.2);
       monsterPosition.addScaledVector(monsterDirection, speed * delta);
       monsterState.object.position.y = 0;
       monsterState.object.rotation.y = Math.atan2(monsterDirection.x, monsterDirection.z);
-
-      if (monsterState.mode === 'patrol' && distance < 0.6) {
-        monsterState.targetIndex = (monsterState.targetIndex + 1) % monsterState.patrolPoints.length;
-      }
     }
+
+    laughterSource.position.copy(monsterPosition).add(monsterAudioOffset);
+
+    const playerDistance = monsterPosition.distanceTo(playerPosition);
+    if (!gameState.ended) {
+      interactionText.textContent =
+        playerDistance < 3
+          ? "Don't look back. It's breathing on your neck."
+          : 'Run. The monster is right behind you!';
+      interactionText.classList.add('active');
+    }
+
+    if (playerDistance < 1.15) {
+      endGame('caught');
+    }
+    return;
   }
 
   laughterSource.position.copy(monsterPosition).add(monsterAudioOffset);
+}
 
-  const playerDistance = monsterPosition.distanceTo(controls.getObject().position);
-  if (monsterState.mode === 'chase') {
-    if (playerDistance < 1.5) {
-      interactionText.textContent = 'It caught you. The maze inhales.';
-      interactionText.classList.add('active');
-    } else {
-      interactionText.textContent = 'Run. The footsteps are right behind you!';
-      interactionText.classList.add('active');
-    }
-  } else if (playerDistance < 7) {
-    interactionText.textContent = 'Stay quiet. Something is pacing nearby.';
-    interactionText.classList.add('active');
+function checkChaseTrigger() {
+  if (gameState.triggered || gameState.ended || !environment.chaseTrigger) return;
+
+  const triggerRadius = environment.cellSize * 0.45;
+  const distanceSq = controls
+    .getObject()
+    .position.distanceToSquared(environment.chaseTrigger);
+
+  if (distanceSq < triggerRadius * triggerRadius) {
+    triggerAmbush();
   }
 }
 
-function createInteractables(spots) {
-  const interactableObjects = [];
-  if (!spots || spots.length === 0) {
-    return interactableObjects;
+function triggerAmbush() {
+  if (!monsterState.object) return;
+
+  gameState.triggered = true;
+  gameState.phase = 'ambush';
+  gameState.movementLocked = true;
+  gameState.ambushTimer = 0;
+
+  const playerObject = controls.getObject();
+  const playerPosition = playerObject.position;
+  controls.getDirection(forwardVector);
+  forwardVector.y = 0;
+  if (forwardVector.lengthSq() < 0.0001) {
+    forwardVector.set(0, 0, -1);
+  } else {
+    forwardVector.normalize();
   }
 
-  const geometry = new THREE.BoxGeometry(1.6, 0.4, 1.6);
-  const material = new THREE.MeshStandardMaterial({
-    color: 0x1f0707,
-    roughness: 0.8,
-    metalness: 0.1,
-  });
+  const ambushDistance = Math.max(environment.cellSize * 0.65, 3.5);
+  tempVector.copy(playerPosition).addScaledVector(forwardVector, ambushDistance);
 
-  spots.forEach((spot, index) => {
-    const altar = new THREE.Mesh(geometry, material);
-    altar.position.set(spot.x, 0.2, spot.z);
-    altar.castShadow = true;
-    altar.receiveShadow = true;
-    altar.userData = {
-      interacted: false,
-      message: index === 0 ? 'Press SPACE to steady the whispers' : 'Press SPACE to hush the next whisper',
-    };
+  monsterState.object.visible = true;
+  monsterState.object.position.set(tempVector.x, 0, tempVector.z);
+  monsterState.object.lookAt(playerPosition.x, 1.6, playerPosition.z);
+  laughterSource.position.copy(monsterState.object.position).add(monsterAudioOffset);
 
-    const candle = new THREE.PointLight(0xff5a2a, 0.9, 10, 2.2);
-    candle.position.set(spot.x, 1.3, spot.z);
-    candle.userData.type = 'flicker';
-    candle.castShadow = true;
+  setMonsterMode('ambush');
 
-    scene.add(altar);
-    scene.add(candle);
-
-    interactableObjects.push(altar);
-  });
-
-  return interactableObjects;
+  interactionText.textContent = 'It blocks the path. Turn around!';
+  interactionText.classList.add('active');
 }
 
-function checkInteractions() {
-  let nearest = null;
-  let minDistance = Infinity;
+function updateAmbush(delta) {
+  if (gameState.phase !== 'ambush' || !monsterState.object) return;
 
-  for (const object of interactables) {
-    const distance = object.position.distanceTo(playerCollider.center);
-    if (distance < 3 && distance < minDistance) {
-      nearest = object;
-      minDistance = distance;
-    }
+  gameState.ambushTimer += delta;
+  if (gameState.ambushTimer < 1.2) {
+    return;
   }
 
-  if (nearest) {
-    if (!nearest.userData.interacted) {
-      interactionText.textContent = nearest.userData.message;
-    } else if (monsterState.mode !== 'chase') {
-      interactionText.textContent = 'The air is listening for you...';
-    }
-    interactionText.classList.add('active');
-  } else if (monsterState.mode !== 'chase') {
-    interactionText.textContent = 'Trace the whispers threading through the maze...';
-    interactionText.classList.remove('active');
+  const yawObject = controls.getObject();
+  yawObject.rotation.y = THREE.MathUtils.euclideanModulo(
+    yawObject.rotation.y + Math.PI,
+    Math.PI * 2,
+  );
+
+  gameState.phase = 'chase';
+  gameState.movementLocked = false;
+
+  setMonsterMode('chase');
+  interactionText.textContent = 'Run! It\'s coming from behind!';
+  interactionText.classList.add('active');
+}
+
+function checkWinCondition() {
+  if (gameState.ended || !environment.goalPosition) return;
+
+  const winRadius = environment.cellSize * 0.4;
+  const distanceSq = controls
+    .getObject()
+    .position.distanceToSquared(environment.goalPosition);
+
+  if (distanceSq < winRadius * winRadius) {
+    endGame('survived');
   }
 }
 
-function attemptInteraction(threshold) {
-  let nearest = null;
-  let minDistance = Infinity;
+function endGame(outcome) {
+  if (gameState.ended) return;
 
-  for (const object of interactables) {
-    const distance = object.position.distanceTo(playerCollider.center);
-    if (distance < 3 && distance < minDistance) {
-      nearest = object;
-      minDistance = distance;
-    }
+  gameState.ended = true;
+  gameState.phase = outcome;
+  gameState.movementLocked = true;
+
+  const shouldHideMonster = outcome === 'survived';
+  if (monsterState.object && shouldHideMonster) {
+    monsterState.object.visible = false;
+  }
+  setMonsterMode('dormant');
+
+  if (positionalAudio.isPlaying) {
+    positionalAudio.stop();
   }
 
-  if (nearest && !nearest.userData.interacted) {
-    nearest.userData.interacted = true;
-    ritualsCompleted += 1;
-    interactionText.textContent = 'The whisper cuts out. Something else stirs.';
-    interactionText.classList.add('active');
+  const message =
+    outcome === 'survived'
+      ? 'You reach the maze heart. The creature loses you.'
+      : 'The creature catches you. The maze swallows the light.';
+  interactionText.textContent = `${message} Click Restart to try again.`;
+  interactionText.classList.add('active');
 
-    scene.traverse((object) => {
-      if (object.isLight && object.userData?.type === 'flicker') {
-        object.intensity += 0.4;
-      }
-    });
+  restartButton.classList.add('visible');
 
-    if (ritualsCompleted >= threshold) {
-      setMonsterMode('chase');
-      interactionText.textContent = 'Run. The creature is hunting you now!';
-      interactionText.classList.add('active');
-    }
+  if (document.pointerLockElement) {
+    document.exitPointerLock();
   }
 }
+
+// Legacy shrine interactivity was removed for the focused hallway scenario.
