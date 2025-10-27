@@ -1,0 +1,86 @@
+name: Convert Joy LIB4D
+
+on:
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: "Preset name inside the LIB4D"
+        default: "Joy"
+        required: true
+      output_glb:
+        description: "Relative path for the exported GLB"
+        default: "assets/joy-character.glb"
+        required: true
+      separate_gltf:
+        description: "Generate a .gltf + .bin alongside the GLB"
+        type: boolean
+        default: true
+
+jobs:
+  convert:
+    name: Convert Cinema 4D Library
+    runs-on:
+      - self-hosted
+      - cinema4d
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Export GLB from LIB4D
+        env:
+          LIB4D_PATH: "joy v23.lib4d"
+          PRESET_NAME: ${{ github.event.inputs.preset }}
+          OUTPUT_GLB: ${{ github.event.inputs.output_glb }}
+        run: |
+          if [ ! -f "$LIB4D_PATH" ]; then
+            echo "LIB4D asset '$LIB4D_PATH' is missing." >&2
+            exit 1
+          fi
+
+          mkdir -p "$(dirname "$OUTPUT_GLB")"
+
+          c4dpy tools/convert_lib4d_to_gltf.py \
+            --lib "$LIB4D_PATH" \
+            --preset "$PRESET_NAME" \
+            --output "$OUTPUT_GLB"
+
+      - name: Optionally extract .gltf + .bin
+        if: ${{ github.event.inputs.separate_gltf == 'true' }}
+        env:
+          OUTPUT_GLB: ${{ github.event.inputs.output_glb }}
+        run: |
+          npm install --no-save gltf-pipeline
+          npx gltf-pipeline -i "$OUTPUT_GLB" -o "${OUTPUT_GLB%.glb}.gltf" --separate
+
+      - name: Derive output paths
+        id: paths
+        env:
+          OUTPUT_GLB: ${{ github.event.inputs.output_glb }}
+        run: |
+          base="$OUTPUT_GLB"
+          if [[ "$OUTPUT_GLB" == *.glb ]]; then
+            base="${OUTPUT_GLB%.glb}"
+          fi
+          echo "glb=$OUTPUT_GLB" >> "$GITHUB_OUTPUT"
+          echo "gltf=${base}.gltf" >> "$GITHUB_OUTPUT"
+          echo "bin=${base}.bin" >> "$GITHUB_OUTPUT"
+
+      - name: Upload GLB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: joy-glb
+          path: ${{ steps.paths.outputs.glb }}
+          if-no-files-found: error
+
+      - name: Upload GLTF bundle
+        if: ${{ github.event.inputs.separate_gltf == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: joy-gltf
+          path: |
+            ${{ steps.paths.outputs.gltf }}
+            ${{ steps.paths.outputs.bin }}
+          if-no-files-found: error

@@ -29,6 +29,12 @@ interactable shrines, positional ambience, and support for skeletal animation.
    `assets/` directory. These files are ignored by Git but loaded at runtime by
    the scene.
 
+   > **Prefer automation?** If you operate a self-hosted runner that already has
+   > Cinema 4D and `c4dpy` installed, you can trigger the `Convert Joy LIB4D`
+   > workflow (`.github/workflows/convert-lib4d.yml`) from the Actions tab. It
+   > will export the GLB and, optionally, create a `.gltf`/`.bin` pair via
+   > `gltf-pipeline`, uploading the results as artifacts for download.
+
 3. **Run the prototype**. After the GLB exists, start a local server (any static
    file server works). If you installed the dev dependency you can use:
 

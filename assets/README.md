@@ -1,6 +1,9 @@
 # Assets
 
 Place the converted GLB/GLTF files generated from the `joy v23.lib4d` archive in this directory.
+You can export them locally with `c4dpy` or download the artifacts produced by
+the `Convert Joy LIB4D` GitHub Action if you have a self-hosted runner with
+Cinema 4D support.
 
 Expected files:
 
