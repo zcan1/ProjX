@@ -5,6 +5,9 @@ import { SimplexNoise } from 'https://unpkg.com/three@0.160.0/examples/jsm/math/
 import { unzipSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/index.js';
 
 const MONSTER_ARCHIVE_URL = './assets/Archive.zip';
+
+window.__LABYRINTH_ECHO_BUILD__ = 'fbx-maze';
+console.info('Labyrinth Echo runtime module loaded');
 const DESIRED_MONSTER_HEIGHT = 2.8;
 
 const canvas = document.getElementById('scene');

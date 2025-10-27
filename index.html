@@ -18,6 +18,16 @@
         <span id="interaction">Trace the whispers threading through the maze...</span>
       </div>
     </div>
+    <script type="module">
+      import('./js/main.js').catch((error) => {
+        console.error('Failed to load Labyrinth Echo runtime', error);
+        const interaction = document.getElementById('interaction');
+        if (interaction) {
+          interaction.textContent =
+            'Unable to load js/main.js. Confirm the file is deployed with the same relative path and reload.';
+        }
+      });
+    </script>
     <script type="module" src="./js/main.js"></script>
   </body>
 </html>

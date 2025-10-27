@@ -104,6 +104,10 @@ interactable shrines, positional ambience, and support for skeletal animation.
   load, inspect the FBX in a DCC tool to confirm the expected filenames.
 - Three.js modules are loaded from a CDN. For offline or air-gapped deployments,
   download the modules locally and adjust the import URLs accordingly.
+- If GitHub Pages only shows the static overlay and the console logs “Unable to
+  load js/main.js…”, double-check that the `js/` directory (and especially
+  `js/main.js`) is committed to the same branch that Pages serves. The inline
+  loader on `index.html` reports this when the module cannot be fetched.
 - Mouse – Look around (after clicking to lock the pointer)
 - `Shift` – Sprint
 - `Space` – Interact with shrines scattered throughout the fog
