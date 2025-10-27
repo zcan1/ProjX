@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Labyrinth Echo Prototype</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./js/vendor/three/build/three.module.js",
+          "three/examples/jsm/loaders/FBXLoader.js": "./js/vendor/three/examples/jsm/loaders/FBXLoader.js",
+          "three/examples/jsm/controls/PointerLockControls.js": "./js/vendor/three/examples/jsm/controls/PointerLockControls.js",
+          "three/examples/jsm/math/SimplexNoise.js": "./js/vendor/three/examples/jsm/math/SimplexNoise.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="overlay">
+      <h1>Labyrinth Echo</h1>
+      <p class="instructions">
+        Click to lock the pointer. Use <strong>WASD</strong> to move, <strong>mouse</strong> to look.
+        Press <strong>Shift</strong> to sprint and <strong>Space</strong> to hush the whispering shrines.
+      </p>
+      <div class="status">
+        <span id="interaction">Trace the whispers threading through the maze...</span>
+      </div>
+    </div>
+    <link rel="modulepreload" href="./js/main.js?v=20240512" />
+    <script type="module">
+      const MODULE_VERSION = '20240512';
+      const moduleUrl = new URL('./js/main.js', import.meta.url);
+      moduleUrl.searchParams.set('v', MODULE_VERSION);
+
+      import(moduleUrl.href).catch((error) => {
+        console.error('Failed to load Labyrinth Echo runtime', error);
+        const interaction = document.getElementById('interaction');
+        if (interaction) {
+          interaction.textContent =
+            'Unable to load js/main.js. Confirm the file is deployed with the same relative path and reload.';
+        }
+      });
+    </script>
+  </body>
+</html>
