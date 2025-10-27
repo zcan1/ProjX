@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Labyrinth Echo Prototype</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="overlay">
+      <h1>Labyrinth Echo</h1>
+      <p class="instructions">
+        Click to lock the pointer. Use <strong>WASD</strong> to move, <strong>mouse</strong> to look.
+        Press <strong>Shift</strong> to sprint and <strong>Space</strong> to hush the whispering shrines.
+      </p>
+      <div class="status">
+        <span id="interaction">Trace the whispers threading through the maze...</span>
+      </div>
+    </div>
+    <script type="module">
+      import('./js/main.js').catch((error) => {
+        console.error('Failed to load Labyrinth Echo runtime', error);
+        const interaction = document.getElementById('interaction');
+        if (interaction) {
+          interaction.textContent =
+            'Unable to load js/main.js. Confirm the file is deployed with the same relative path and reload.';
+        }
+      });
+    </script>
+  </body>
+</html>
